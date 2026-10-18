@@ -1,0 +1,227 @@
+---
+title: "Italian Serie A Analysis"
+output:
+  html_document:
+    css: style.css
+    theme: united
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+# Introduction
+
+The objective of this project is to identify the most successful team in Italian Serie A since 1993.
+
+The data are obtained from the Italy section of the Football-Data website. Each season is stored as a separate CSV file. The analysis focuses on:
+
+- Scraping all Serie A datasets (I1.csv)
+- Combining seasons into a single dataframe
+- Cleaning the data
+- Computing team statistics
+- Ranking teams according to points accumulated since 1993
+
+# Challenge 1: Scraping Strategy (No Code)
+
+The website provides one CSV file per season.
+
+The scraping strategy is:
+
+1. Open the Italy page.
+2. Extract all hyperlinks.
+3. Keep only links associated with Serie A (`I1.csv`).
+4. Import every season.
+5. Merge all seasons into a single data frame.
+6. Keep only the variables required for the analysis.
+7. Remove observations with missing dates.
+
+# Challenge 2: Importing and Cleaning the Data
+
+```{r load_data}
+library(tidyverse)
+library(rvest)
+
+# Scrape all Serie A URLs
+
+page <- read_html("https://www.football-data.co.uk/italym.php")
+
+serie_a_urls <- page |>
+  html_elements("a") |>
+  html_attr("href") |>
+  na.omit()
+
+serie_a_urls <- serie_a_urls[
+  str_detect(serie_a_urls, "I1\\.csv$")
+]
+
+serie_a_urls <- paste0(
+  "https://www.football-data.co.uk/",
+  serie_a_urls
+) |>
+  unique()
+
+# Function to import one season
+
+read_season <- function(url) {
+
+  tryCatch({
+
+    read_csv(
+      url,
+      show_col_types = FALSE
+    ) |>
+      select(
+        any_of(
+          c(
+            "Date",
+            "HomeTeam",
+            "AwayTeam",
+            "FTHG",
+            "FTAG",
+            "FTR"
+          )
+        )
+      )
+
+  }, error = function(e) {
+
+    NULL
+
+  })
+}
+
+# Import all seasons
+
+serie_a_master <- serie_a_urls |>
+  map(read_season) |>
+  compact() |>
+  bind_rows()
+
+# Keep valid dates only
+
+valid_matches <- serie_a_master |>
+  filter(!is.na(Date))
+
+# Required dataset
+
+valid_dates <- valid_matches |>
+  select(
+    Date,
+    HomeTeam,
+    AwayTeam,
+    FTHG,
+    FTAG
+  )
+
+# Summary
+
+cat("Rows before filtering:", nrow(serie_a_master), "\n")
+cat("Rows after filtering:", nrow(valid_matches), "\n")
+```
+
+## Dataset Preview
+
+```{r}
+head(valid_dates)
+```
+
+The combined Serie A dataset contains 13,030 observations. After removing observations with missing dates, 11,786 valid matches remain.
+
+# Challenge 3: Historical Team Statistics
+
+To compute team statistics, each match is transformed into two observations:
+
+- One from the home team's perspective.
+- One from the away team's perspective.
+
+The match outcome is then classified as a win, loss, or draw.
+
+```{r process_leaderboard}
+
+# Home perspective
+
+home_data <- valid_matches |>
+  mutate(
+    Team = HomeTeam,
+    Outcome = case_when(
+      FTR == "H" ~ "Wins",
+      FTR == "A" ~ "Losses",
+      FTR == "D" ~ "Draws"
+    )
+  ) |>
+  select(Team, Outcome)
+
+# Away perspective
+
+away_data <- valid_matches |>
+  mutate(
+    Team = AwayTeam,
+    Outcome = case_when(
+      FTR == "A" ~ "Wins",
+      FTR == "H" ~ "Losses",
+      FTR == "D" ~ "Draws"
+    )
+  ) |>
+  select(Team, Outcome)
+
+# Team statistics
+
+ team_statistics <- bind_rows(home_data, away_data) |>
+  count(Team, Outcome, name = "Count") |>
+  pivot_wider(
+    names_from = Outcome,
+    values_from = Count,
+    values_fill = 0
+  ) |>
+  mutate(
+    Matches = Wins + Losses + Draws,
+    Points = 3 * Wins + Draws,
+    PointsPerMatch = round(Points / Matches, 3)
+  ) |>
+  arrange(desc(Points))
+```
+
+## Top 20 Teams
+
+```{r}
+knitr::kable(
+  head(team_statistics, 20),
+  caption = "Top 20 Serie A Teams Since 1993"
+)
+```
+
+# Results
+
+```{r}
+team_statistics |>
+  slice(1:10)
+```
+
+The ranking is based on the standard football scoring system:
+
+- Win = 3 points
+- Draw = 1 point
+- Loss = 0 points
+
+# Challenge 4: Come up with at least 3 data questions on the data at hand
+
+What are the most common match scores in Serie A since 1993?
+
+Has the average number of goals scored per match increased or decreased over time?
+
+Which teams perform significantly better at home than away?
+
+Which clubs have spent the most seasons in Serie A since 1993?
+
+# Conclusion
+
+Using all available Serie A matches since 1993, Juventus emerges as the most successful club in the dataset.
+
+Juventus accumulated the highest number of total points and achieved the best overall performance across the period analyzed.
+
+Therefore, based on the available data, **Juventus can be considered the strongest Italian Serie A team from 1993 to the present**.
